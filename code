@@ -1,0 +1,163 @@
+#
+# This is a Shiny web application. You can run the application by clicking
+# the 'Run App' button above.
+#
+# Find out more about building applications with Shiny here:
+#
+#    http://shiny.rstudio.com/
+#
+
+library(shiny)
+library(leaflet)
+library(sf)
+library(tidyverse)
+library(shinydashboard)
+library(shinycssloaders)
+library(shinymanager)
+
+source("ca_dataprep.R")
+
+ui <- secure_app(
+  fluidPage(
+  titlePanel("Rarity: Modeling LSI in California"),
+  
+  fluidRow(
+    column(
+      4,
+      wellPanel(
+        shiny::selectInput(
+        inputId = "Variable1", 
+        "Map 1 Variable: ", 
+        list(
+          "Local Social Inequity Score" = "LSI", 
+          "Life Expectancy" = "LifeExpectancy", 
+          "Percent Poverty" = "PovertyPct", 
+          "Percent Uninsured" = "NoInsurancePct",
+          "Percent Mentally Unhealthy" = "MentallyUnhealthy", 
+          "Smoking Prevalence" = "SmokingPrevalence", 
+          "Binge Drinking Prevalence" = "BingeDrinkingPrevalence", 
+          "Median AQI" = "MedianAQI", 
+          "Percent Non-Hispanic Black" = "NHBlackPct", 
+          "Percent Hispanic" = "HispanicPct"
+        ), selected = "LSI"), 
+        
+        br(),
+        br(),
+        hr(),
+        
+        withSpinner(leafletOutput(outputId = "map1", width = "500px", height = "700px")
+        )
+      )
+    ),
+    
+    
+    column(
+      4, 
+      wellPanel(
+        shiny::selectInput(
+        inputId = "Variable2", 
+        "Map 2 Variable (Outcome): ", 
+        list(
+          "C-19 Vulnerability" = "C19_Score", 
+          "Kidney Disease Rate" = "KIDNEY",
+          "Diabetes Rate" = "DIABETES", 
+          "Cancer Rate" = "CANCER", 
+          "Asthma Rate" = "CASTHMA", 
+          "Coronary Heart Disease Rate" = "CHD"
+        ), 
+        selected = "C19_Score"), 
+        
+        br(),
+        br(),
+        hr(),
+        
+        withSpinner(leafletOutput(outputId = "map2", width = "500px", height = "700px"))
+      )
+    )
+  )
+))
+
+# Define server logic required to draw a histogram
+server <- function(input, output) {
+  
+  result_auth <- secure_server(check_credentials = check_credentials(credentials))
+  
+  output$res_auth <- renderPrint({
+    reactiveValuesToList(result_auth)
+  })
+  
+  observeEvent(input$Variable, {print(input$Variable)})
+  
+  # outcomeVar <- eventReactive(input$variable, {
+  #   ca_data[, input$Variable] %>% st_drop_geometry() %>% pull() 
+  # })
+  
+  output$map1 <- renderLeaflet({
+    validate(need(input$Variable1, 'variable not created yet'))
+    pal <- colorNumeric(
+      palette = "magma",
+      domain = ca_data[, input$Variable1] %>% st_drop_geometry() %>% pull(), 
+      na.color = NA, 
+      reverse = if_else(input$Variable1 == "LifeExpectancy", TRUE, FALSE))
+      # draw the histogram with the specified number of bins
+    leaflet() %>%
+      addMapPane(name = "polygons", zIndex = 410) %>% 
+      addMapPane(name = "maplabels", zIndex = 420) %>%
+      addProviderTiles("CartoDB.PositronNoLabels") %>% 
+      addProviderTiles("CartoDB.PositronOnlyLabels", 
+                       options = c(leafletOptions(pane = "maplabels"), providerTileOptions(opacity = .5)),
+                       group = "map labels") %>% 
+      leaflet::addPolygons(data = ca_data,
+                           group =  "ca_data",
+                           color = "#444444",
+                           weight = .5,
+                           fillOpacity = .9,
+                           fillColor = ~pal(ca_data[, input$Variable1] %>% st_drop_geometry() %>% pull() ),
+                           label = lapply(labs, HTML), 
+                           options = leafletOptions(pane = "polygons")) %>%
+      addLegend("bottomright", pal = pal, values = ca_data[, input$Variable1] %>% st_drop_geometry() %>% pull() ,
+                title = input$Variable1,
+                opacity = 1, 
+                bins = 10,
+                labFormat = labelFormat(transform = function(x) sort(x, decreasing = FALSE))) %>% 
+        addLayersControl(baseGroups = "CartoDB.PositronNoLabels",
+                         overlayGroups = c("map labels",
+                                           "ca_data"))
+  })
+  
+  output$map2 <- renderLeaflet({
+    validate(need(input$Variable2, 'variable not created yet'))
+    pal <- colorNumeric(
+      palette = "magma",
+      domain = ca_data[, input$Variable2] %>% st_drop_geometry() %>% pull(), 
+      na.color = NA, 
+      reverse = if_else(input$Variable2 == "LifeExpectancy", TRUE, FALSE))
+    # draw the histogram with the specified number of bins
+    leaflet() %>%
+      addMapPane(name = "polygons", zIndex = 410) %>% 
+      addMapPane(name = "maplabels", zIndex = 420) %>%
+      addProviderTiles("CartoDB.PositronNoLabels") %>% 
+      addProviderTiles("CartoDB.PositronOnlyLabels", 
+                       options = c(leafletOptions(pane = "maplabels"), providerTileOptions(opacity = .5)),
+                       group = "map labels") %>% 
+      leaflet::addPolygons(data = ca_data,
+                           group =  "ca_data",
+                           color = "#444444",
+                           weight = .5,
+                           fillOpacity = .9,
+                           fillColor = ~pal(ca_data[, input$Variable2] %>% st_drop_geometry() %>% pull() ),
+                           label = lapply(labs, HTML), 
+                           options = leafletOptions(pane = "polygons")) %>%
+      addLegend("bottomright", pal = pal, values = ca_data[, input$Variable2] %>% st_drop_geometry() %>% pull() ,
+                title = input$Variable2,
+                bins = 10,
+                opacity = 1, 
+                labFormat = labelFormat(transform = function(x) sort(x, decreasing = FALSE))) %>% 
+      addLayersControl(baseGroups = "CartoDB.PositronNoLabels",
+                       overlayGroups = c("map labels",
+                                         "ca_data"))
+  })
+}
+
+# Run the application 
+shinyApp(ui = ui, server = server)
